@@ -881,7 +881,17 @@ async function start() {
 
         client.on('ready', () => {
             logger.info(`Logged in as ${client.user.tag}`);
-        });
+            
+            client.user.setPresence({
+                activities: [
+                    {
+                        name: 'with your roles',
+                        type: 'PLAYING'
+                    }
+                ],
+                status: 'online'
+            });
+        }); 
 
         client.on('interactionCreate', handleInteraction);
 
