@@ -18,6 +18,14 @@ const DATABASE_URL = process.env.DATABASE_URL;
 const TOKEN = process.env.DISCORD_TOKEN;
 const PORT = process.env.PORT || 3000;
 
+// Debug logging
+console.log('[DEBUG] Environment variables:');
+console.log('[DEBUG] DATABASE_URL exists:', !!DATABASE_URL);
+console.log('[DEBUG] DATABASE_URL length:', DATABASE_URL?.length);
+console.log('[DEBUG] DATABASE_URL starts with:', DATABASE_URL?.substring(0, 30) + '...');
+console.log('[DEBUG] TOKEN exists:', !!TOKEN);
+console.log('[DEBUG] PORT:', PORT);
+
 if (!TOKEN) {
     console.error('❌ Missing required environment variables: DISCORD_TOKEN');
     process.exit(1);
@@ -25,6 +33,13 @@ if (!TOKEN) {
 
 if (!DATABASE_URL) {
     console.error('❌ Missing required environment variables: DATABASE_URL');
+    process.exit(1);
+}
+
+// Validate DATABASE_URL format
+if (!DATABASE_URL.startsWith('postgresql://')) {
+    console.error('❌ DATABASE_URL must start with postgresql://');
+    console.error('❌ Received:', DATABASE_URL.substring(0, 50));
     process.exit(1);
 }
 
@@ -60,16 +75,24 @@ process.on('uncaughtException', (error) => {
    DB
 ========================================================= */
 
-const pool = new Pool({
-    connectionString: DATABASE_URL,
-    ssl: {
-        rejectUnauthorized: false
-    }
-});
+let pool;
+try {
+    pool = new Pool({
+        connectionString: DATABASE_URL,
+        ssl: {
+            rejectUnauthorized: false
+        }
+    });
 
-pool.on('error', (err) => {
-    logger.error(`Unexpected error on idle client: ${err.message}`);
-});
+    pool.on('error', (err) => {
+        logger.error(`Unexpected error on idle client: ${err.message}`);
+    });
+
+    logger.info('Database pool created successfully');
+} catch (err) {
+    logger.error(`Failed to create database pool: ${err.message}`);
+    process.exit(1);
+}
 
 const dbGet = async (q, p) => {
     const result = await pool.query(q, p);
@@ -933,7 +956,9 @@ app.get('/stats', async (req, res) => {
 
 async function start() {
     try {
+        logger.info('Starting database initialization...');
         await initDatabase();
+        logger.info('Database initialization complete');
 
         discordClient = new Client({
             intents: [
@@ -962,6 +987,7 @@ async function start() {
             logger.error(`Client error: ${err.message}`);
         });
 
+        logger.info('Logging into Discord...');
         const queueInterval = setInterval(() => {
             processQueue(discordClient).catch(err => {
                 logger.error(`Queue processing error: ${err.message}`);
@@ -991,6 +1017,7 @@ async function start() {
 
     } catch (err) {
         logger.error(`Startup failed: ${err.message}`);
+        console.error(err);
         process.exit(1);
     }
 }
