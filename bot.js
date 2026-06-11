@@ -8,6 +8,7 @@ const {
 } = require('discord.js');
 
 const { Pool } = require('pg');
+const express = require('express');
 
 /* =========================================================
    CONFIG
@@ -15,6 +16,7 @@ const { Pool } = require('pg');
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const TOKEN = process.env.DISCORD_TOKEN;
+const PORT = process.env.PORT || 3000;
 
 if (!TOKEN) {
     console.error('❌ Missing required environment variables: DISCORD_TOKEN');
@@ -865,6 +867,67 @@ async function processQueue(client) {
 }
 
 /* =========================================================
+   EXPRESS SERVER
+========================================================= */
+
+let discordClient;
+
+const app = express();
+app.use(express.json());
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+    res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Process queue endpoint (for cron job calls)
+app.post('/process-queue', async (req, res) => {
+    if (!discordClient || !discordClient.isReady()) {
+        return res.status(503).json({ error: 'Discord client not ready' });
+    }
+
+    try {
+        await processQueue(discordClient);
+        res.json({ status: 'success', message: 'Queue processed' });
+    } catch (err) {
+        logger.error(`Process queue endpoint error: ${err.message}`);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Stats endpoint
+app.get('/stats', async (req, res) => {
+    try {
+        const pendingJobs = await dbAll(`
+            SELECT COUNT(*) as count FROM action_queue WHERE status='PENDING'
+        `, []);
+
+        const successJobs = await dbAll(`
+            SELECT COUNT(*) as count FROM action_queue WHERE status='SUCCESS'
+        `, []);
+
+        const failedJobs = await dbAll(`
+            SELECT COUNT(*) as count FROM action_queue WHERE status LIKE 'FAILED%'
+        `, []);
+
+        const auditLogEntries = await dbAll(`
+            SELECT COUNT(*) as count FROM audit_log
+        `, []);
+
+        res.json({
+            bot_status: discordClient?.isReady() ? 'online' : 'offline',
+            pending_jobs: parseInt(pendingJobs[0]?.count || 0),
+            success_jobs: parseInt(successJobs[0]?.count || 0),
+            failed_jobs: parseInt(failedJobs[0]?.count || 0),
+            total_audit_logs: parseInt(auditLogEntries[0]?.count || 0),
+            timestamp: new Date().toISOString()
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+/* =========================================================
    BOOT
 ========================================================= */
 
@@ -872,17 +935,17 @@ async function start() {
     try {
         await initDatabase();
 
-        const client = new Client({
+        discordClient = new Client({
             intents: [
                 GatewayIntentBits.Guilds,
                 GatewayIntentBits.GuildMembers
             ]
         });
 
-        client.on('ready', () => {
-            logger.info(`Logged in as ${client.user.tag}`);
+        discordClient.on('ready', () => {
+            logger.info(`Logged in as ${discordClient.user.tag}`);
             
-            client.user.setPresence({
+            discordClient.user.setPresence({
                 activities: [
                     {
                         name: 'with your roles',
@@ -893,25 +956,31 @@ async function start() {
             });
         }); 
 
-        client.on('interactionCreate', handleInteraction);
+        discordClient.on('interactionCreate', handleInteraction);
 
-        client.on('error', (err) => {
+        discordClient.on('error', (err) => {
             logger.error(`Client error: ${err.message}`);
         });
 
         const queueInterval = setInterval(() => {
-            processQueue(client).catch(err => {
+            processQueue(discordClient).catch(err => {
                 logger.error(`Queue processing error: ${err.message}`);
             });
         }, 5000);
 
-        await client.login(TOKEN);
+        await discordClient.login(TOKEN);
+
+        // Start Express server
+        const server = app.listen(PORT, () => {
+            logger.info(`Server listening on port ${PORT}`);
+        });
 
         // Graceful shutdown
         const shutdown = async () => {
             logger.info('Shutting down gracefully...');
             clearInterval(queueInterval);
-            client.destroy();
+            server.close();
+            discordClient.destroy();
             await pool.end();
             logger.info('Database connection closed');
             process.exit(0);
@@ -991,5 +1060,6 @@ module.exports = {
     processQueue,
     runDiagnostics,
     parseDuration,
-    logAction
+    logAction,
+    app
 };
