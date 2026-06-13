@@ -19,5 +19,13 @@
   },
   "devDependencies": {
     "jest": "^30.4.2"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/davefromroblox/role-manager.git"
+  },
+  "bugs": {
+    "url": "https://github.com/davefromroblox/role-manager/issues"
+  },
+  "homepage": "https://github.com/davefromroblox/role-manager#readme"
 }
