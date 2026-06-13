@@ -118,7 +118,7 @@ module.exports = {
             );
             logger.info(`[${guild.id}] Queued ${type} ${targetRole.id} for ${targetUser.id}`);
             return interaction.reply({
-                content: `⏱️ **${type}** ${targetRole} for <@${targetUser.id}> has been requested; a moderator will review it.`,
+                content: `⏱️ **${type}** ${targetRole} for <@${targetUser.id}> is being processed.`,
                 ephemeral: true
             });
         } catch (err) {

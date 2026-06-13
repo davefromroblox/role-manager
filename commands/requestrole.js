@@ -3,7 +3,8 @@ const {
     EmbedBuilder, 
     ActionRowBuilder, 
     ButtonBuilder, 
-    ButtonStyle 
+    ButtonStyle,
+    PermissionFlagsBits
 } = require('discord.js');
 const { dbGet, dbRun } = require('../lib/db');
 const logger = require('../lib/logger');
@@ -14,85 +15,136 @@ module.exports = {
         .setDescription('Submit a role request for approval')
         .addUserOption(o => o.setName('user').setDescription('The user who needs the role').setRequired(true))
         .addRoleOption(o => o.setName('role').setDescription('The role being requested').setRequired(true))
-        .addStringOption(o => o.setName('reason').setDescription('Justification for this request').setRequired(true)),
+        .addStringOption(o => o.setName('reason')
+            .setDescription('Justification for this request (Max 500 chars)')
+            .setRequired(true)
+            .setMaxLength(500)),
 
     async execute(interaction) {
         const { guild, member, options } = interaction;
 
-        // Fetch server configuration
-        const config = await dbGet(
-            `SELECT log_channel_id, protected_role_id FROM config WHERE guild_id = $1`,
-            [guild.id]
+        const blacklisted = await dbGet(
+            `SELECT 1 FROM request_blacklist WHERE guild_id = $1 AND user_id = $2`,
+            [guild.id, member.id]
         );
 
-        // Fallback to interaction channel if no explicit administration log channel is configured
-        const approvalChannelId = config?.log_channel_id;
+        if (blacklisted) {
+            return interaction.reply({
+                content: '❌ You are blacklisted from using the role request system. Please contact a server administrator.',
+                ephemeral: true
+            });
+        }        
+
+        // 1. Fetch server configuration
+        const config = await dbGet(
+            `SELECT role_requests_channel_id, protected_role_id FROM config WHERE guild_id = $1`,
+            [guild.id]
+        );
+        
+        // 2. Validate configuration
+        const approvalChannelId = config?.role_requests_channel_id;
         if (!approvalChannelId) {
             return interaction.reply({
-                content: '❌ Setup incomplete. An administrative log/approval channel has not been configured for this server.',
+                content: '❌ Setup incomplete. A dedicated Role Requests channel has not been configured by an administrator.',
                 ephemeral: true
             });
         }
 
+        // 3. Extract and Validate Options (Declared ONLY ONCE here)
         const targetUser = options.getUser('user', true);
         const targetRole = options.getRole('role', true);
         const reason = options.getString('reason', true).trim();
 
-        // 1. Fetch target member and validate current state
+        if (targetUser.bot) {
+            return interaction.reply({ content: '❌ You cannot request roles for bots.', ephemeral: true });
+        }
+
+        if (targetRole.permissions.has(PermissionFlagsBits.Administrator)) {
+            return interaction.reply({ content: '❌ Administrator roles cannot be requested.', ephemeral: true });
+        }
+
+        // 4. Duplicate Request Check
+        const existing = await dbGet(
+            `SELECT id FROM action_queue
+            WHERE guild_id = $1 AND target_user_id = $2 AND role_id = $3 AND status = 'AWAITING_APPROVAL'`,
+            [guild.id, targetUser.id, targetRole.id]
+        );
+
+        if (existing) {
+            return interaction.reply({ content: '⚠️ This request is already pending approval.', ephemeral: true });
+        }
+
+        // 5. Fetch Member and Hierarchy Checks
         const targetMember = await guild.members.fetch(targetUser.id).catch(() => null);
         if (!targetMember) {
             return interaction.reply({ content: '❌ Could not find that user in this server.', ephemeral: true });
         }
 
         if (targetMember.roles.cache.has(targetRole.id)) {
+            return interaction.reply({ content: `ℹ️ <@${targetUser.id}> already has the **${targetRole.name}** role.`, ephemeral: true });
+        }
+
+        const botMember = await guild.members.fetchMe();
+        if (targetRole.position >= botMember.roles.highest.position) {
             return interaction.reply({
-                content: `ℹ️ <@${targetUser.id}> already has the **${targetRole.name}** role.`,
+                content: `❌ I cannot assign **${targetRole.name}** because it is higher than my highest role in the hierarchy.`,
                 ephemeral: true
             });
         }
 
-        // 2. Protected role baseline guardrail
         if (config?.protected_role_id && targetRole.id === config.protected_role_id) {
-            return interaction.reply({
-                content: `❌ **${targetRole.name}** is a highly protected role and cannot be requested via this system.`,
-                ephemeral: true
-            });
+            return interaction.reply({ content: `❌ **${targetRole.name}** is a protected role and cannot be requested.`, ephemeral: true });
         }
 
-        // Defer reply since we are hitting external webhooks/channels
         await interaction.deferReply({ ephemeral: true });
 
         try {
-            // 3. Generate a tracking ID by inserting the initial record as 'AWAITING_APPROVAL'
+            // 6. Insert into Database
             const result = await dbRun(
                 `INSERT INTO action_queue
                     (guild_id, actor_id, target_user_id, role_id, action_type, reason, status)
-                 VALUES ($1, $2, $3, $4, 'ADD', $5, 'AWAITING_APPROVAL')
-                 RETURNING id`,
+                VALUES ($1, $2, $3, $4, 'ADD', $5, 'AWAITING_APPROVAL')
+                RETURNING id`,
                 [guild.id, member.id, targetUser.id, targetRole.id, reason]
             );
-            
-            // Note: Adjust depending on your wrapper framework. 
-            // If dbRun returns the row array directly via pg client, extract the id:
-            const requestId = result.rows?.[0]?.id || result.insertId; 
 
-            // 4. Build the Interactive Approval Card Layout
+            const requestId = result?.rows?.[0]?.id;
+            if (!requestId) throw new Error('DB failed to return Request ID');
+
+            // 7. Notify Target User (DM)
+            const isSelfRequest = member.id === targetUser.id;
+            const targetDmEmbed = new EmbedBuilder()
+                .setColor(0xf1c40f)
+                .setTitle('📩 Role Request')
+                .setDescription(
+                    isSelfRequest 
+                        ? `You have requested the **${targetRole.name}** role for yourself.` 
+                        : `<@${member.id}> has requested the **${targetRole.name}** role for you.`
+                )
+                .addFields({ name: 'Reason', value: reason })
+                .setFooter({ text: `Request ID: #${requestId}` });
+
+            await targetUser.send({ embeds: [targetDmEmbed] }).catch(() => {
+                logger.warn(`Could not DM user ${targetUser.id} about role request.`);
+            });
+
+            // 8. Send to Approval Channel
             const approvalChannel = await guild.channels.fetch(approvalChannelId).catch(() => null);
             if (!approvalChannel || !approvalChannel.isTextBased()) {
                 return interaction.editReply({ content: '❌ Configured approval channel is invalid or inaccessible.' });
             }
 
-            const embed = new EmbedBuilder()
-                .setColor(0xF1C40F) // Amber / Warning tone
+            const approvalEmbed = new EmbedBuilder()
+                .setColor(0xF1C40F) 
                 .setTitle('📋 Role Request Pending')
                 .setDescription(`A new role assignment requires authorization.`)
                 .addFields(
-                    { name: 'Target User', value: `<@${targetUser.id}> (\`${targetUser.id}\`)`, inline: true },
-                    { name: 'Requested Role', value: `${targetRole} (\`${targetRole.id}\`)`, inline: true },
+                    { name: 'Target User', value: `<@${targetUser.id}>`, inline: true },
+                    { name: 'Requested Role', value: `${targetRole.name}`, inline: true },
                     { name: 'Requested By', value: `<@${member.id}>`, inline: false },
                     { name: 'Reason', value: `\`\`\`${reason}\`\`\`` }
                 )
-                .setFooter({ text: `Request ID: # ${requestId}` })
+                .setFooter({ text: `Request ID: #${requestId}` })
                 .setTimestamp();
 
             const buttons = new ActionRowBuilder().addComponents(
@@ -106,21 +158,21 @@ module.exports = {
                     .setStyle(ButtonStyle.Danger)
             );
 
-            const approvalMessage = await approvalChannel.send({ embeds: [embed], components: [buttons] });
+            const approvalMessage = await approvalChannel.send({ embeds: [approvalEmbed], components: [buttons] });
 
-            // 5. Update queue record with the message context for tracking/cleanup later
+            // 9. Update Job with Message ID for later reference
             await dbRun(
                 `UPDATE action_queue SET approval_message_id = $1 WHERE id = $2`,
                 [approvalMessage.id, requestId]
             );
 
             return interaction.editReply({ 
-                content: `✅ Request **#${requestId}** has been sent to the administration channel for review.` 
+                content: `✅ Request successfully submitted. A moderator will review it.` 
             });
 
         } catch (err) {
-            logger.error(`Database/API error in /requestrole: ${err.message}`);
-            return interaction.editReply({ content: '❌ An error occurred while routing your request.' });
+            logger.error(`Error in /requestrole: ${err.message}`);
+            return interaction.editReply({ content: '❌ An error occurred while processing your request.' });
         }
     }
 };
