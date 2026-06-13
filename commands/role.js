@@ -31,14 +31,14 @@ module.exports = {
             [guild.id]
         );
 
-        const managerRoleId      = config?.manager_role_id ?? null;
-        const reasonRequired     = (config?.reason_required ?? 0) === 1;
-        const isAdmin            = member.permissions.has(PermissionFlagsBits.Administrator);
-        const isOwner            = guild.ownerId === member.id;
-        const subcommand         = options.getSubcommand();
-        const targetUser         = options.getUser('user', true);
-        const targetRole         = options.getRole('role', true);
-        const rawReason          = options.getString('reason');
+        const managerRoleId  = config?.manager_role_id ?? null;
+        const reasonRequired = (config?.reason_required ?? 0) === 1;
+        const isAdmin        = member.permissions.has(PermissionFlagsBits.Administrator);
+        const isOwner        = guild.ownerId === member.id;
+        const subcommand     = options.getSubcommand();
+        const targetUser     = options.getUser('user', true);
+        const targetRole     = options.getRole('role', true);
+        const rawReason      = options.getString('reason');
 
         if (!targetUser || !targetRole) {
             return interaction.reply({ content: '❌ Invalid user or role provided.', ephemeral: true });
@@ -53,7 +53,6 @@ module.exports = {
 
         const reason = rawReason?.trim() || 'No reason provided';
 
-        // Authorization
         const isAuthorized = isAdmin || isOwner || (managerRoleId && member.roles.cache.has(managerRoleId));
         if (!isAuthorized) {
             return interaction.reply({
@@ -62,7 +61,6 @@ module.exports = {
             });
         }
 
-        // Bot hierarchy check
         const botMember = await guild.members.fetchMe().catch(() => null);
         if (!botMember) {
             return interaction.reply({ content: '❌ Could not fetch bot member data.', ephemeral: true });
@@ -75,7 +73,6 @@ module.exports = {
             });
         }
 
-        // User hierarchy check
         if (!isOwner && !isAdmin && targetRole.position >= member.roles.highest.position) {
             return interaction.reply({
                 content: `❌ You cannot manage **${targetRole.name}** — it's equal to or above your highest role.`,
@@ -83,10 +80,30 @@ module.exports = {
             });
         }
 
-        // Protected role check
         if (config?.protected_role_id && targetRole.id === config.protected_role_id) {
             return interaction.reply({
                 content: `❌ **${targetRole.name}** is a protected role and cannot be modified.`,
+                ephemeral: true
+            });
+        }
+
+        const targetMember = await guild.members.fetch(targetUser.id).catch(() => null);
+        if (!targetMember) {
+            return interaction.reply({ content: '❌ Could not find that user in this server.', ephemeral: true });
+        }
+
+        const hasRole = targetMember.roles.cache.has(targetRole.id);
+
+        if (subcommand === 'add' && hasRole) {
+            return interaction.reply({
+                content: `ℹ️ <@${targetUser.id}> already has the **${targetRole.name}** role.`,
+                ephemeral: true
+            });
+        }
+
+        if (subcommand === 'remove' && !hasRole) {
+            return interaction.reply({
+                content: `ℹ️ <@${targetUser.id}> does not have the **${targetRole.name}** role.`,
                 ephemeral: true
             });
         }
@@ -101,7 +118,7 @@ module.exports = {
             );
             logger.info(`[${guild.id}] Queued ${type} ${targetRole.id} for ${targetUser.id}`);
             return interaction.reply({
-                content: `**${type}** ${targetRole} for <@${targetUser.id}>, this may take some time to process, depending on the queue length.`,
+                content: `⏱️ **${type}** ${targetRole} for <@${targetUser.id}> has been requested; a moderator will review it.`,
                 ephemeral: true
             });
         } catch (err) {
