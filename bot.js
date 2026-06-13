@@ -130,12 +130,12 @@ async function start() {
 
         await client.login(TOKEN);
 
-        // Queue processor — runs every 5 seconds
+        // Queue processor — runs every 10 seconds
         const queueInterval = setInterval(() => {
             processQueue(client).catch(err => {
                 logger.error(`Queue tick error: ${err.message}`);
             });
-        }, 5000);
+        }, 10000);
 
         const server = app.listen(PORT, () => {
             logger.info(`Express server listening on port ${PORT}`);

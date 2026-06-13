@@ -13,10 +13,10 @@ module.exports = {
     data: new SlashCommandBuilder()
         .setName('requestrole')
         .setDescription('Submit a role request for approval')
-        .addUserOption(o => o.setName('user').setDescription('The user who needs the role').setRequired(true))
+        .addUserOption(o => o.setName('user').setDescription('The user who needs the role (NOT YOURSELF)').setRequired(true))
         .addRoleOption(o => o.setName('role').setDescription('The role being requested').setRequired(true))
         .addStringOption(o => o.setName('reason')
-            .setDescription('Justification for this request (Max 500 chars)')
+            .setDescription('Business owners/public sector recruiters must provide proof in reason (Imgur link, Trello, etc.)')
             .setRequired(true)
             .setMaxLength(500)),
 
@@ -121,8 +121,7 @@ module.exports = {
                         ? `You have requested the **${targetRole.name}** role for yourself.` 
                         : `<@${member.id}> has requested the **${targetRole.name}** role for you.`
                 )
-                .addFields({ name: 'Reason', value: reason })
-                .setFooter({ text: `Request ID: #${requestId}` });
+                .addFields({ name: 'Reason', value: reason });
 
             await targetUser.send({ embeds: [targetDmEmbed] }).catch(() => {
                 logger.warn(`Could not DM user ${targetUser.id} about role request.`);
@@ -144,7 +143,6 @@ module.exports = {
                     { name: 'Requested By', value: `<@${member.id}>`, inline: false },
                     { name: 'Reason', value: `\`\`\`${reason}\`\`\`` }
                 )
-                .setFooter({ text: `Request ID: #${requestId}` })
                 .setTimestamp();
 
             const buttons = new ActionRowBuilder().addComponents(
