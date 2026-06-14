@@ -80,3 +80,7 @@
 [DEBUG] 2026-06-14T12:31:28.039Z dbGet: SELECT * FROM config WHERE guild_id=$1 | params: ["1262020593340125285"]
 [DEBUG] 2026-06-14T12:31:28.280Z dbGet: SELECT 1 FROM pg_tables WHERE tablename = 'audit_log' | params: []
 [DEBUG] 2026-06-14T12:31:28.522Z dbGet: SELECT 1 FROM pg_tables WHERE tablename = 'request_blacklist' | params: []
+[DEBUG] 2026-06-14T12:41:27.239Z dbAll: SELECT * FROM action_queue
+             WHERE status = 'PENDING' AND COALESCE(attempt_count, 0) < $1
+             ORDER BY created_at ASC
+             LIMIT $2 | params: [5,20]

@@ -155,7 +155,7 @@ async function start() {
             processQueue(client).catch(err => {
                 logger.error(`Queue fallback tick error: ${err.message}`);
             });
-        }, 900000); // 15 minutes
+        }, 600000); // 10 minutes
 
         const server = app.listen(PORT, () => {
             logger.info(`Express server listening on port ${PORT}`);
