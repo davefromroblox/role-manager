@@ -1,5 +1,5 @@
 // commands/config.js
-const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
+const { SlashCommandBuilder, MessageFlags, PermissionFlagsBits } = require('discord.js');
 const { dbRun, ensureConfigRow } = require('../lib/db');
 const logger = require('../lib/logger');
 
@@ -45,7 +45,7 @@ module.exports = {
         if (!isAdmin && !isOwner) {
             return interaction.reply({
                 content: '❌ Only server administrators can use config commands.',
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
 
@@ -64,7 +64,7 @@ module.exports = {
 
             return interaction.reply({
                 content: `✅ Log channel set to ${channel}.`,
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
 
@@ -80,7 +80,7 @@ module.exports = {
 
             return interaction.reply({
                 content: `✅ Role requests channel set to ${channel}.`,
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
 
@@ -96,7 +96,7 @@ module.exports = {
 
             return interaction.reply({
                 content: `✅ Manager role set to ${role}.`,
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
 
@@ -112,7 +112,7 @@ module.exports = {
 
             return interaction.reply({
                 content: `✅ Protected role set to ${role}.`,
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
 
@@ -128,7 +128,7 @@ module.exports = {
 
             return interaction.reply({
                 content: `✅ Reason requirement: **${enabled ? 'ENABLED' : 'DISABLED'}**`,
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
 
@@ -144,7 +144,7 @@ module.exports = {
 
             return interaction.reply({
                 content: `🚫 <@${target.id}> has been blacklisted from requesting roles.`,
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
 
@@ -158,7 +158,7 @@ module.exports = {
 
             return interaction.reply({
                 content: `✅ <@${target.id}> is no longer blacklisted.`,
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
     }

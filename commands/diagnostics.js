@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, MessageFlags } = require('discord.js');
 const { dbGet, dbAll } = require('../lib/db');
 
 /* =========================================================
@@ -170,10 +170,10 @@ module.exports = {
     async execute(interaction) {
         const { guild, member } = interaction;
         if (!member.permissions.has(PermissionFlagsBits.Administrator) && guild.ownerId !== member.id) {
-            return interaction.reply({ content: '❌ Access Denied.', ephemeral: true });
+            return interaction.reply({ content: '❌ Access Denied.', flags: MessageFlags.Ephemeral });
         }
 
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
         const targetModule = interaction.options.getString('target');
         const report = { passed: 0, warnings: 0, failed: 0, sections: [] };

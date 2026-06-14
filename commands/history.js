@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, MessageFlags } = require('discord.js');
 const { dbGet, dbAll } = require('../lib/db');
 
 module.exports = {
@@ -17,13 +17,13 @@ module.exports = {
         const isManager = config?.manager_role_id && member.roles.cache.has(config.manager_role_id);
 
         if (!isAdmin && !isOwner && !isManager) {
-            return interaction.reply({ content: '❌ Access Denied.', ephemeral: true });
+            return interaction.reply({ content: '❌ Access Denied.', flags: MessageFlags.Ephemeral });
         }
 
         const targetUser = options.getUser('user', true);
         const limit      = options.getInteger('limit') ?? 10;
 
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
         const entries = await dbAll(
             `SELECT action, role_id, actor_id, reason, timestamp

@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const { dbGet, dbRun } = require('../lib/db');
 const logger = require('../lib/logger');
 
@@ -23,7 +23,7 @@ module.exports = {
         const { guild, member, options } = interaction;
 
         if (!member?.roles) {
-            return interaction.reply({ content: '❌ Unable to access your member data.', ephemeral: true });
+            return interaction.reply({ content: '❌ Unable to access your member data.', flags: MessageFlags.Ephemeral });
         }
 
         const config = await dbGet(
@@ -41,13 +41,13 @@ module.exports = {
         const rawReason      = options.getString('reason');
 
         if (!targetUser || !targetRole) {
-            return interaction.reply({ content: '❌ Invalid user or role provided.', ephemeral: true });
+            return interaction.reply({ content: '❌ Invalid user or role provided.', flags: MessageFlags.Ephemeral });
         }
 
         if (reasonRequired && (!rawReason || !rawReason.trim())) {
             return interaction.reply({
                 content: '❌ A reason is required.\nThis server requires a reason when assigning or removing roles.',
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
 
@@ -57,39 +57,39 @@ module.exports = {
         if (!isAuthorized) {
             return interaction.reply({
                 content: '❌ Access Denied.\nYou must be a server admin or hold the configured manager role.',
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
 
         const botMember = await guild.members.fetchMe().catch(() => null);
         if (!botMember) {
-            return interaction.reply({ content: '❌ Could not fetch bot member data.', ephemeral: true });
+            return interaction.reply({ content: '❌ Could not fetch bot member data.', flags: MessageFlags.Ephemeral });
         }
 
         if (targetRole.position >= botMember.roles.highest.position) {
             return interaction.reply({
                 content: `❌ I cannot manage **${targetRole.name}** — it's above my highest role.\nMove my role above it in server settings.`,
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
 
         if (!isOwner && !isAdmin && targetRole.position >= member.roles.highest.position) {
             return interaction.reply({
                 content: `❌ You cannot manage **${targetRole.name}** — it's equal to or above your highest role.`,
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
 
         if (config?.protected_role_id && targetRole.id === config.protected_role_id) {
             return interaction.reply({
                 content: `❌ **${targetRole.name}** is a protected role and cannot be modified.`,
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
 
         const targetMember = await guild.members.fetch(targetUser.id).catch(() => null);
         if (!targetMember) {
-            return interaction.reply({ content: '❌ Could not find that user in this server.', ephemeral: true });
+            return interaction.reply({ content: '❌ Could not find that user in this server.', flags: MessageFlags.Ephemeral });
         }
 
         const hasRole = targetMember.roles.cache.has(targetRole.id);
@@ -97,14 +97,14 @@ module.exports = {
         if (subcommand === 'add' && hasRole) {
             return interaction.reply({
                 content: `ℹ️ <@${targetUser.id}> already has the **${targetRole.name}** role.`,
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
 
         if (subcommand === 'remove' && !hasRole) {
             return interaction.reply({
                 content: `ℹ️ <@${targetUser.id}> does not have the **${targetRole.name}** role.`,
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
 
@@ -119,11 +119,11 @@ module.exports = {
             logger.info(`[${guild.id}] Queued ${type} ${targetRole.id} for ${targetUser.id}`);
             return interaction.reply({
                 content: `⏱️ **${type}** ${targetRole} for <@${targetUser.id}> is being processed.`,
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         } catch (err) {
             logger.error(`Database error in /role: ${err.message}`);
-            return interaction.reply({ content: '❌ Database error occurred.', ephemeral: true });
+            return interaction.reply({ content: '❌ Database error occurred.', flags: MessageFlags.Ephemeral });
         }
     }
 };
