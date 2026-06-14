@@ -130,32 +130,12 @@ async function start() {
 
         await client.login(TOKEN);
 
-        // Coalesce bursts of NOTIFY events into a single processQueue() call
-        let queueRunScheduled = false;
-        const scheduleQueueRun = () => {
-            if (queueRunScheduled) return;
-            queueRunScheduled = true;
-            setImmediate(() => {
-                queueRunScheduled = false;
-                processQueue(client).catch(err => {
-                    logger.error(`Queue trigger error: ${err.message}`);
-                });
-            });
-        };
-
-        // Event-driven: process immediately when a job becomes PENDING
-        const listenerClient = await listenForQueueJobs(() => scheduleQueueRun());
-
-        // Catch up on anything that was queued while the bot was offline
-        scheduleQueueRun();
-
-        // Safety-net poll in case a NOTIFY is ever missed (e.g. brief
-        // listener reconnects).
+        // Queue processor — runs every 5 seconds
         const queueInterval = setInterval(() => {
             processQueue(client).catch(err => {
                 logger.error(`Queue fallback tick error: ${err.message}`);
             });
-        }, 900000); // 15 minutes
+        }, 5000);
 
         const server = app.listen(PORT, () => {
             logger.info(`Express server listening on port ${PORT}`);
