@@ -1,4 +1,4 @@
-const { EmbedBuilder, PermissionFlagsBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
+const { EmbedBuilder, PermissionFlagsBits, MessageFlags, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
 const { dbGet, dbRun } = require('../lib/db');
 const { audit } = require('../lib/helpers');
 const logger = require('../lib/logger');
@@ -11,7 +11,7 @@ module.exports = {
         // Basic safety: ignore interactions outside of guilds
         if (!guild || !member) {
             if (interaction.isRepliable()) {
-                return interaction.reply({ content: '❌ This bot can only be used in servers.', ephemeral: true });
+                return interaction.reply({ content: '❌ This bot can only be used in servers.', flags: MessageFlags.Ephemeral });
             }
             return;
         }
@@ -29,7 +29,7 @@ module.exports = {
             if (blacklisted && interaction.commandName === 'requestrole') {
                 return interaction.reply({
                     content: '❌ You are blacklisted from using the role request system.',
-                    ephemeral: true
+                    flags: MessageFlags.Ephemeral
                 });
             }
 
@@ -40,7 +40,7 @@ module.exports = {
                 await command.execute(interaction);
             } catch (err) {
                 logger.error(`Error in /${interaction.commandName}: ${err.message}`);
-                const reply = { content: '❌ An unexpected error occurred.', ephemeral: true };
+                const reply = { content: '❌ An unexpected error occurred.', flags: MessageFlags.Ephemeral };
                 if (interaction.deferred || interaction.replied) {
                     await interaction.editReply(reply).catch(() => {});
                 } else {
@@ -73,7 +73,7 @@ module.exports = {
                 if (!isAdmin && !isOwner && !isManager) {
                     return interaction.reply({
                         content: '❌ Access Denied. You do not have permission to review role requests.',
-                        ephemeral: true
+                        flags: MessageFlags.Ephemeral
                     });
                 }
 
@@ -86,7 +86,7 @@ module.exports = {
                 if (!job || job.status !== 'AWAITING_APPROVAL') {
                     return interaction.reply({
                         content: '❌ This request has already been processed or no longer exists.',
-                        ephemeral: true
+                        flags: MessageFlags.Ephemeral
                     });
                 }
 
@@ -108,7 +108,7 @@ module.exports = {
 
             } catch (err) {
                 logger.error(`Button Interaction Error: ${err.message}`);
-                return interaction.reply({ content: '❌ Error processing interaction.', ephemeral: true }).catch(() => {});
+                return interaction.reply({ content: '❌ Error processing interaction.', flags: MessageFlags.Ephemeral }).catch(() => {});
             }
         }
 
@@ -128,7 +128,7 @@ module.exports = {
 
                 const job = await dbGet(`SELECT * FROM action_queue WHERE id = $1`, [requestId]);
                 if (!job || job.status !== 'AWAITING_APPROVAL') {
-                    return interaction.followUp({ content: '❌ This request was already processed.', ephemeral: true });
+                    return interaction.followUp({ content: '❌ This request was already processed.', flags: MessageFlags.Ephemeral });
                 }
 
                 const requester = await guild.members.fetch(job.actor_id).catch(() => null);
@@ -156,7 +156,9 @@ module.exports = {
                             .setTitle('✅ Request Approved')
                             .setDescription(isSelfRequest ? `Your request for **${roleName}** was accepted.` : `<@${job.actor_id}>'s request for you was accepted.`)
                             .addFields({ name: 'Staff Note', value: staffReason });
-                        await targetMember.send({ embeds: [embed] }).catch(() => {});
+                        await targetMember.send({ embeds: [embed] }).catch((e) => {
+                            logger.warn(`[Request #${requestId}] Could not DM target ${targetMember.id} about approval: ${e.message}`);
+                        });
                     }
                     if (requester && !isSelfRequest) {
                         const embed = new EmbedBuilder()
@@ -164,7 +166,9 @@ module.exports = {
                             .setTitle('✅ Request Approved')
                             .setDescription(`Your request for <@${job.target_user_id}> to receive **${roleName}** was accepted.`)
                             .addFields({ name: 'Staff Note', value: staffReason });
-                        await requester.send({ embeds: [embed] }).catch(() => {});
+                        await requester.send({ embeds: [embed] }).catch((e) => {
+                            logger.warn(`[Request #${requestId}] Could not DM requester ${requester.id} about approval: ${e.message}`);
+                        });
                     }
                 } else {
                     await dbRun(`UPDATE action_queue SET status = 'DENIED' WHERE id = $1`, [requestId]);
@@ -183,7 +187,9 @@ module.exports = {
                             .setTitle('❌ Request Denied')
                             .setDescription(isSelfRequest ? `Your request for **${roleName}** was denied.` : `<@${job.actor_id}>'s request for you was denied.`)
                             .addFields({ name: 'Reason', value: staffReason });
-                        await targetMember.send({ embeds: [embed] }).catch(() => {});
+                        await targetMember.send({ embeds: [embed] }).catch((e) => {
+                            logger.warn(`[Request #${requestId}] Could not DM target ${targetMember.id} about denial: ${e.message}`);
+                        });
                     }
                     if (requester && !isSelfRequest) {
                         const embed = new EmbedBuilder()
@@ -191,7 +197,9 @@ module.exports = {
                             .setTitle('❌ Request Denied')
                             .setDescription(`Your request for <@${job.target_user_id}> to receive **${roleName}** was denied.`)
                             .addFields({ name: 'Reason', value: staffReason });
-                        await requester.send({ embeds: [embed] }).catch(() => {});
+                        await requester.send({ embeds: [embed] }).catch((e) => {
+                            logger.warn(`[Request #${requestId}] Could not DM requester ${requester.id} about denial: ${e.message}`);
+                        });
                     }
                 }
 
@@ -210,10 +218,17 @@ module.exports = {
                     .setFooter({ text: `ID: #${requestId}` })
                     .setTimestamp();
 
-                await interaction.message.edit({ embeds: [finalEmbed], components: [] });
+                // DB state is already committed at this point — a failure here
+                // means the request WAS approved/denied, but the moderator's
+                // log message could not be updated to reflect it.
+                try {
+                    await interaction.message.edit({ embeds: [finalEmbed], components: [] });
+                } catch (editErr) {
+                    logger.error(`[Request #${requestId}] DB updated (${action}) but failed to update approval message: ${editErr.message}`);
+                }
 
             } catch (err) {
-                logger.error(`Modal Submission Error: ${err.message}`);
+                logger.error(`Modal Submission Error [Request #${requestId}]: ${err.message}`);
             }
         }
     }

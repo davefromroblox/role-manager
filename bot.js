@@ -6,7 +6,7 @@ const { Client, GatewayIntentBits, Collection } = require('discord.js');
 const express = require('express');
 
 const logger       = require('./lib/logger');
-const { pool, initDatabase } = require('./lib/db');
+const { pool, initDatabase, listenForQueueJobs } = require('./lib/db');
 const { processQueue }       = require('./lib/queue');
 const { dbAll }              = require('./lib/db');
 
@@ -130,12 +130,32 @@ async function start() {
 
         await client.login(TOKEN);
 
-        // Queue processor — runs every 5 seconds
+        // Coalesce bursts of NOTIFY events into a single processQueue() call
+        let queueRunScheduled = false;
+        const scheduleQueueRun = () => {
+            if (queueRunScheduled) return;
+            queueRunScheduled = true;
+            setImmediate(() => {
+                queueRunScheduled = false;
+                processQueue(client).catch(err => {
+                    logger.error(`Queue trigger error: ${err.message}`);
+                });
+            });
+        };
+
+        // Event-driven: process immediately when a job becomes PENDING
+        const listenerClient = await listenForQueueJobs(() => scheduleQueueRun());
+
+        // Catch up on anything that was queued while the bot was offline
+        scheduleQueueRun();
+
+        // Safety-net poll in case a NOTIFY is ever missed (e.g. brief
+        // listener reconnects).
         const queueInterval = setInterval(() => {
             processQueue(client).catch(err => {
-                logger.error(`Queue tick error: ${err.message}`);
+                logger.error(`Queue fallback tick error: ${err.message}`);
             });
-        }, 5000);
+        }, 900000); // 15 minutes
 
         const server = app.listen(PORT, () => {
             logger.info(`Express server listening on port ${PORT}`);
@@ -145,6 +165,10 @@ async function start() {
         const shutdown = async () => {
             logger.info('Shutting down gracefully...');
             clearInterval(queueInterval);
+            if (listenerClient) {
+                try { await listenerClient.query('UNLISTEN queue_jobs'); } catch (_) {}
+                try { listenerClient.release(); } catch (_) {}
+            }
             server.close();
             client.destroy();
             await pool.end();

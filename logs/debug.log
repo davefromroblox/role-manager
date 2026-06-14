@@ -1,0 +1,82 @@
+[DEBUG] 2026-06-14T12:20:46.434Z dbAll: SELECT * FROM action_queue
+             WHERE status = 'PENDING' AND COALESCE(attempt_count, 0) < $1
+             ORDER BY created_at ASC
+             LIMIT $2 | params: [5,20]
+[DEBUG] 2026-06-14T12:20:52.725Z dbGet: SELECT 1 FROM request_blacklist WHERE guild_id = $1 AND user_id = $2 | params: ["1262020593340125285","266566142905155585"]
+[DEBUG] 2026-06-14T12:20:53.468Z dbGet: SELECT * FROM config WHERE guild_id=$1 | params: ["1262020593340125285"]
+[DEBUG] 2026-06-14T12:20:53.728Z dbGet: SELECT 1 FROM pg_tables WHERE tablename = 'audit_log' | params: []
+[DEBUG] 2026-06-14T12:20:53.975Z dbGet: SELECT 1 FROM pg_tables WHERE tablename = 'request_blacklist' | params: []
+[DEBUG] 2026-06-14T12:20:54.230Z dbGet: SELECT 1 | params: []
+[DEBUG] 2026-06-14T12:20:54.471Z dbAll: SELECT tablename FROM pg_tables WHERE schemaname='public' | params: []
+[DEBUG] 2026-06-14T12:20:54.732Z dbGet: SELECT COUNT(*) as count FROM "config" | params: []
+[DEBUG] 2026-06-14T12:20:54.972Z dbGet: SELECT COUNT(*) as count FROM "action_queue" | params: []
+[DEBUG] 2026-06-14T12:20:55.236Z dbGet: SELECT COUNT(*) as count FROM "audit_log" | params: []
+[DEBUG] 2026-06-14T12:20:55.477Z dbGet: SELECT COUNT(*) as count FROM "request_blacklist" | params: []
+[DEBUG] 2026-06-14T12:20:55.748Z dbAll: SELECT COUNT(*) as count FROM action_queue WHERE guild_id=$1 AND status='PENDING' | params: ["1262020593340125285"]
+[DEBUG] 2026-06-14T12:20:55.989Z dbAll: SELECT COUNT(*) as count FROM action_queue WHERE guild_id=$1 AND status LIKE 'FAILED%' | params: ["1262020593340125285"]
+[DEBUG] 2026-06-14T12:21:04.474Z dbGet: SELECT 1 FROM request_blacklist WHERE guild_id = $1 AND user_id = $2 | params: ["1262020593340125285","266566142905155585"]
+[DEBUG] 2026-06-14T12:21:04.716Z dbGet: SELECT manager_role_id, reason_required, protected_role_id FROM config WHERE guild_id = $1 | params: ["1262020593340125285"]
+[DEBUG] 2026-06-14T12:21:04.975Z dbRun: INSERT INTO action_queue
+                    (guild_id, actor_id, target_user_id, role_id, action_type, reason, status)
+                VALUES ($1, $2, $3, $4, $5, $6, 'PENDING') | params: ["1262020593340125285","266566142905155585","843247452076638298","1262020738647588974","ADD","give"]
+[DEBUG] 2026-06-14T12:21:05.217Z dbAll: SELECT * FROM action_queue
+             WHERE status = 'PENDING' AND COALESCE(attempt_count, 0) < $1
+             ORDER BY created_at ASC
+             LIMIT $2 | params: [5,20]
+[DEBUG] 2026-06-14T12:21:06.985Z dbRun: UPDATE action_queue
+                     SET status='IN_PROGRESS', updated_at=CURRENT_TIMESTAMP
+                     WHERE id=$1 AND status='PENDING' | params: [31]
+[DEBUG] 2026-06-14T12:21:08.760Z dbRun: INSERT INTO audit_log (guild_id, actor_id, target_id, role_id, action, reason, metadata)
+             VALUES ($1, $2, $3, $4, $5, $6, $7) | params: ["1262020593340125285","266566142905155585","843247452076638298","1262020738647588974","ADD","give","{}"]
+[DEBUG] 2026-06-14T12:21:09.006Z dbRun: UPDATE action_queue SET status='SUCCESS', updated_at=CURRENT_TIMESTAMP WHERE id=$1 | params: [31]
+[DEBUG] 2026-06-14T12:21:09.251Z dbGet: SELECT log_channel_id FROM config WHERE guild_id = $1 | params: ["1262020593340125285"]
+[DEBUG] 2026-06-14T12:21:33.826Z dbGet: SELECT 1 FROM request_blacklist WHERE guild_id = $1 AND user_id = $2 | params: ["1262020593340125285","266566142905155585"]
+[DEBUG] 2026-06-14T12:21:35.593Z dbGet: SELECT 1 FROM request_blacklist WHERE guild_id = $1 AND user_id = $2 | params: ["1262020593340125285","266566142905155585"]
+[DEBUG] 2026-06-14T12:21:35.837Z dbGet: SELECT role_requests_channel_id, protected_role_id FROM config WHERE guild_id = $1 | params: ["1262020593340125285"]
+[DEBUG] 2026-06-14T12:21:36.093Z dbGet: SELECT id FROM action_queue
+            WHERE guild_id = $1 AND target_user_id = $2 AND role_id = $3 AND status = 'AWAITING_APPROVAL' | params: ["1262020593340125285","843247452076638298","1514626889631928382"]
+[DEBUG] 2026-06-14T12:21:36.706Z dbRun: INSERT INTO action_queue
+                    (guild_id, actor_id, target_user_id, role_id, action_type, reason, status)
+                VALUES ($1, $2, $3, $4, 'ADD', $5, 'AWAITING_APPROVAL')
+                RETURNING id | params: ["1262020593340125285","266566142905155585","843247452076638298","1514626889631928382","givme"]
+[DEBUG] 2026-06-14T12:21:37.744Z dbRun: UPDATE action_queue SET approval_message_id = $1 WHERE id = $2 | params: ["1515692678983979141",32]
+[DEBUG] 2026-06-14T12:21:41.037Z dbGet: SELECT manager_role_id FROM config WHERE guild_id = $1 | params: ["1262020593340125285"]
+[DEBUG] 2026-06-14T12:21:41.309Z dbGet: SELECT status FROM action_queue WHERE id = $1 | params: ["32"]
+[DEBUG] 2026-06-14T12:21:44.247Z dbGet: SELECT * FROM action_queue WHERE id = $1 | params: ["32"]
+[DEBUG] 2026-06-14T12:21:44.520Z dbRun: UPDATE action_queue 
+                        SET status = 'PENDING', 
+                            approver_id = $1, 
+                            last_error = $2, 
+                            updated_at = CURRENT_TIMESTAMP 
+                        WHERE id = $3 | params: ["266566142905155585","Approved: gwan","32"]
+[DEBUG] 2026-06-14T12:21:44.766Z dbAll: SELECT * FROM action_queue
+             WHERE status = 'PENDING' AND COALESCE(attempt_count, 0) < $1
+             ORDER BY created_at ASC
+             LIMIT $2 | params: [5,20]
+[DEBUG] 2026-06-14T12:21:45.023Z dbRun: UPDATE action_queue
+                     SET status='IN_PROGRESS', updated_at=CURRENT_TIMESTAMP
+                     WHERE id=$1 AND status='PENDING' | params: [32]
+[DEBUG] 2026-06-14T12:21:46.463Z dbRun: INSERT INTO audit_log (guild_id, actor_id, target_id, role_id, action, reason, metadata)
+             VALUES ($1, $2, $3, $4, $5, $6, $7) | params: ["1262020593340125285","266566142905155585","843247452076638298","1514626889631928382","ADD","givme","{}"]
+[DEBUG] 2026-06-14T12:21:46.731Z dbRun: UPDATE action_queue SET status='SUCCESS', updated_at=CURRENT_TIMESTAMP WHERE id=$1 | params: [32]
+[DEBUG] 2026-06-14T12:21:46.977Z dbGet: SELECT log_channel_id FROM config WHERE guild_id = $1 | params: ["1262020593340125285"]
+[DEBUG] 2026-06-14T12:31:09.171Z dbAll: SELECT * FROM action_queue
+             WHERE status = 'PENDING' AND COALESCE(attempt_count, 0) < $1
+             ORDER BY created_at ASC
+             LIMIT $2 | params: [5,20]
+[DEBUG] 2026-06-14T12:31:19.461Z dbGet: SELECT 1 FROM request_blacklist WHERE guild_id = $1 AND user_id = $2 | params: ["1262020593340125285","266566142905155585"]
+[DEBUG] 2026-06-14T12:31:20.144Z dbGet: SELECT * FROM config WHERE guild_id=$1 | params: ["1262020593340125285"]
+[DEBUG] 2026-06-14T12:31:20.387Z dbGet: SELECT 1 FROM pg_tables WHERE tablename = 'audit_log' | params: []
+[DEBUG] 2026-06-14T12:31:20.644Z dbGet: SELECT 1 FROM pg_tables WHERE tablename = 'request_blacklist' | params: []
+[DEBUG] 2026-06-14T12:31:20.886Z dbGet: SELECT 1 | params: []
+[DEBUG] 2026-06-14T12:31:21.146Z dbAll: SELECT tablename FROM pg_tables WHERE schemaname='public' | params: []
+[DEBUG] 2026-06-14T12:31:21.387Z dbGet: SELECT COUNT(*) as count FROM "config" | params: []
+[DEBUG] 2026-06-14T12:31:21.648Z dbGet: SELECT COUNT(*) as count FROM "action_queue" | params: []
+[DEBUG] 2026-06-14T12:31:21.888Z dbGet: SELECT COUNT(*) as count FROM "audit_log" | params: []
+[DEBUG] 2026-06-14T12:31:22.150Z dbGet: SELECT COUNT(*) as count FROM "request_blacklist" | params: []
+[DEBUG] 2026-06-14T12:31:22.406Z dbAll: SELECT COUNT(*) as count FROM action_queue WHERE guild_id=$1 AND status='PENDING' | params: ["1262020593340125285"]
+[DEBUG] 2026-06-14T12:31:22.652Z dbAll: SELECT COUNT(*) as count FROM action_queue WHERE guild_id=$1 AND status LIKE 'FAILED%' | params: ["1262020593340125285"]
+[DEBUG] 2026-06-14T12:31:27.434Z dbGet: SELECT 1 FROM request_blacklist WHERE guild_id = $1 AND user_id = $2 | params: ["1262020593340125285","266566142905155585"]
+[DEBUG] 2026-06-14T12:31:28.039Z dbGet: SELECT * FROM config WHERE guild_id=$1 | params: ["1262020593340125285"]
+[DEBUG] 2026-06-14T12:31:28.280Z dbGet: SELECT 1 FROM pg_tables WHERE tablename = 'audit_log' | params: []
+[DEBUG] 2026-06-14T12:31:28.522Z dbGet: SELECT 1 FROM pg_tables WHERE tablename = 'request_blacklist' | params: []

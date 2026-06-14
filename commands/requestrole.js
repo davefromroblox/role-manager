@@ -4,6 +4,7 @@ const {
     ActionRowBuilder, 
     ButtonBuilder, 
     ButtonStyle,
+    MessageFlags,
     PermissionFlagsBits
 } = require('discord.js');
 const { dbGet, dbRun } = require('../lib/db');
@@ -13,10 +14,10 @@ module.exports = {
     data: new SlashCommandBuilder()
         .setName('requestrole')
         .setDescription('Submit a role request for approval')
-        .addUserOption(o => o.setName('user').setDescription('The user who needs the role').setRequired(true))
+        .addUserOption(o => o.setName('user').setDescription('The user who needs the role (NOT YOURSELF)').setRequired(true))
         .addRoleOption(o => o.setName('role').setDescription('The role being requested').setRequired(true))
         .addStringOption(o => o.setName('reason')
-            .setDescription('Justification for this request (Max 500 chars)')
+            .setDescription('Business owners/public sector recruiters must provide proof in reason (Imgur link, Trello, etc.)')
             .setRequired(true)
             .setMaxLength(500)),
 
@@ -31,7 +32,7 @@ module.exports = {
         if (blacklisted) {
             return interaction.reply({
                 content: '❌ You are blacklisted from using the role request system. Please contact a server administrator.',
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }        
 
@@ -46,7 +47,7 @@ module.exports = {
         if (!approvalChannelId) {
             return interaction.reply({
                 content: '❌ Setup incomplete. A dedicated Role Requests channel has not been configured by an administrator.',
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
 
@@ -56,11 +57,11 @@ module.exports = {
         const reason = options.getString('reason', true).trim();
 
         if (targetUser.bot) {
-            return interaction.reply({ content: '❌ You cannot request roles for bots.', ephemeral: true });
+            return interaction.reply({ content: '❌ You cannot request roles for bots.', flags: MessageFlags.Ephemeral });
         }
 
         if (targetRole.permissions.has(PermissionFlagsBits.Administrator)) {
-            return interaction.reply({ content: '❌ Administrator roles cannot be requested.', ephemeral: true });
+            return interaction.reply({ content: '❌ Administrator roles cannot be requested.', flags: MessageFlags.Ephemeral });
         }
 
         // 4. Duplicate Request Check
@@ -71,32 +72,36 @@ module.exports = {
         );
 
         if (existing) {
-            return interaction.reply({ content: '⚠️ This request is already pending approval.', ephemeral: true });
+            return interaction.reply({ content: '⚠️ This request is already pending approval.', flags: MessageFlags.Ephemeral });
         }
 
         // 5. Fetch Member and Hierarchy Checks
         const targetMember = await guild.members.fetch(targetUser.id).catch(() => null);
         if (!targetMember) {
-            return interaction.reply({ content: '❌ Could not find that user in this server.', ephemeral: true });
+            return interaction.reply({ content: '❌ Could not find that user in this server.', flags: MessageFlags.Ephemeral });
         }
 
         if (targetMember.roles.cache.has(targetRole.id)) {
-            return interaction.reply({ content: `ℹ️ <@${targetUser.id}> already has the **${targetRole.name}** role.`, ephemeral: true });
+            return interaction.reply({ content: `ℹ️ <@${targetUser.id}> already has the **${targetRole.name}** role.`, flags: MessageFlags.Ephemeral });
         }
 
         const botMember = await guild.members.fetchMe();
         if (targetRole.position >= botMember.roles.highest.position) {
             return interaction.reply({
                 content: `❌ I cannot assign **${targetRole.name}** because it is higher than my highest role in the hierarchy.`,
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
 
         if (config?.protected_role_id && targetRole.id === config.protected_role_id) {
-            return interaction.reply({ content: `❌ **${targetRole.name}** is a protected role and cannot be requested.`, ephemeral: true });
+            return interaction.reply({ content: `❌ **${targetRole.name}** is a protected role and cannot be requested.`, flags: MessageFlags.Ephemeral });
         }
 
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+        // Tracked outside the try block so the catch handler can reference it
+        // even if the failure happens after the INSERT (the DB row already exists by then).
+        let requestId;
 
         try {
             // 6. Insert into Database
@@ -108,7 +113,7 @@ module.exports = {
                 [guild.id, member.id, targetUser.id, targetRole.id, reason]
             );
 
-            const requestId = result?.rows?.[0]?.id;
+            requestId = result?.rows?.[0]?.id;
             if (!requestId) throw new Error('DB failed to return Request ID');
 
             // 7. Notify Target User (DM)
@@ -121,16 +126,16 @@ module.exports = {
                         ? `You have requested the **${targetRole.name}** role for yourself.` 
                         : `<@${member.id}> has requested the **${targetRole.name}** role for you.`
                 )
-                .addFields({ name: 'Reason', value: reason })
-                .setFooter({ text: `Request ID: #${requestId}` });
+                .addFields({ name: 'Reason', value: reason });
 
             await targetUser.send({ embeds: [targetDmEmbed] }).catch(() => {
-                logger.warn(`Could not DM user ${targetUser.id} about role request.`);
+                logger.warn(`[Request #${requestId}] Could not DM user ${targetUser.id} about role request.`);
             });
 
             // 8. Send to Approval Channel
             const approvalChannel = await guild.channels.fetch(approvalChannelId).catch(() => null);
             if (!approvalChannel || !approvalChannel.isTextBased()) {
+                logger.error(`[Request #${requestId}] Approval channel ${approvalChannelId} invalid or inaccessible.`);
                 return interaction.editReply({ content: '❌ Configured approval channel is invalid or inaccessible.' });
             }
 
@@ -144,7 +149,6 @@ module.exports = {
                     { name: 'Requested By', value: `<@${member.id}>`, inline: false },
                     { name: 'Reason', value: `\`\`\`${reason}\`\`\`` }
                 )
-                .setFooter({ text: `Request ID: #${requestId}` })
                 .setTimestamp();
 
             const buttons = new ActionRowBuilder().addComponents(
@@ -171,7 +175,8 @@ module.exports = {
             });
 
         } catch (err) {
-            logger.error(`Error in /requestrole: ${err.message}`);
+            const context = requestId ? `Request #${requestId}` : 'pre-insert';
+            logger.error(`Error in /requestrole [${context}]: ${err.message}`);
             return interaction.editReply({ content: '❌ An error occurred while processing your request.' });
         }
     }
