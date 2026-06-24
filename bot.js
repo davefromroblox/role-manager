@@ -10,7 +10,7 @@ const { pool, initDatabase, listenForQueueJobs, dbAll } = require('./lib/db');
 const { processQueue } = require('./lib/queue');
 
 /* =========================================================
-   ENVIRONMENT
+   ENVIRONMENT CHECKS
 ========================================================= */
 
 const TOKEN = process.env.DISCORD_TOKEN;
@@ -41,7 +41,7 @@ process.on('uncaughtException', (err) => {
 });
 
 /* =========================================================
-   EXPRESS SERVER
+   EXPRESS SERVER (Web Traffic & Health Checks)
 ========================================================= */
 
 const app = express();
@@ -51,7 +51,7 @@ app.get('/', (_req, res) => {
     res.send('Bot is running.');
 });
 
-// Refactored health check so Render does not kill the container while Discord logs in asynchronously
+// Decoupled health check so Render container stays alive during asynchronous Discord gateway handshakes
 app.get('/health', (_req, res) => {
     res.json({
         status: 'ok',
@@ -111,7 +111,7 @@ const server = app.listen(PORT, '0.0.0.0', () => {
 });
 
 /* =========================================================
-   DISCORD CLIENT
+   DISCORD CLIENT INITIALIZATION
 ========================================================= */
 
 const client = new Client({
@@ -162,7 +162,7 @@ if (fs.existsSync(eventsPath)) {
 }
 
 /* =========================================================
-   STARTUP
+   STARTUP SEQUENCE
 ========================================================= */
 
 let listenerClient = null;
@@ -174,7 +174,14 @@ async function start() {
         await initDatabase();
 
         logger.info('Logging into Discord...');
-        await client.login(TOKEN);
+        
+        // Added timeout check to catch if Render's outbound IP gets stuck on the Discord gateway handshake
+        await Promise.race([
+            client.login(TOKEN),
+            new Promise((_, reject) => 
+                setTimeout(() => reject(new Error('Discord gateway connection timed out. Check Privileged Gateway Intents or network restrictions.')), 15000)
+            )
+        ]);
         
         logger.info(`Logged in as ${client.user?.tag || 'Bot'}`);
 
@@ -194,14 +201,12 @@ async function start() {
             });
         };
 
-        // Safely attach database queue listeners once client is fully live
         if (typeof listenForQueueJobs === 'function') {
             listenerClient = await listenForQueueJobs(scheduleQueueRun);
         }
 
         scheduleQueueRun();
 
-        // Queue fallback/interval runner (every 10 minutes)
         queueInterval = setInterval(async () => {
             try {
                 await processQueue(client);
@@ -218,7 +223,7 @@ async function start() {
 }
 
 /* =========================================================
-   SHUTDOWN
+   SHUTDOWN HOOKS
 ========================================================= */
 
 async function shutdown(signal) {
@@ -258,7 +263,7 @@ process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 
 /* =========================================================
-   START
+   ENTRYPOINT
 ========================================================= */
 
 logger.info(`PORT=${PORT}`);
