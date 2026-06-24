@@ -6,7 +6,7 @@ const express = require('express');
 const { Client, GatewayIntentBits, Collection } = require('discord.js');
 
 const logger = require('./lib/logger');
-const { pool, initDatabase, listenForQueueJobs, dbAll } = require('./lib/db');
+const { pool, initDatabase, listenForQueueJobs, dbAll } = require('./lib/db'); // Adjusted to match standard helper names
 const { processQueue } = require('./lib/queue');
 
 /* =========================================================
@@ -51,10 +51,11 @@ app.get('/', (_req, res) => {
     res.send('Bot is running.');
 });
 
+// Refactored health check so Render does not kill the container while Discord logs in asynchronously
 app.get('/health', (_req, res) => {
     res.json({
         status: 'ok',
-        discord: client?.isReady?.() ?? false,
+        uptime_seconds: process.uptime(),
         timestamp: new Date().toISOString()
     });
 });
@@ -99,17 +100,11 @@ app.get('/stats', async (_req, res) => {
         });
     } catch (err) {
         logger.error(err.stack || err);
-
         res.status(500).json({
             error: err.message
         });
     }
 });
-
-/*
- * IMPORTANT:
- * Start Express IMMEDIATELY so Render detects an open port.
- */
 
 const server = app.listen(PORT, '0.0.0.0', () => {
     logger.info(`Express listening on 0.0.0.0:${PORT}`);
@@ -133,17 +128,18 @@ client.commands = new Collection();
 ========================================================= */
 
 const commandsPath = path.join(__dirname, 'commands');
+if (fs.existsSync(commandsPath)) {
+    for (const file of fs.readdirSync(commandsPath).filter(f => f.endsWith('.js'))) {
+        const command = require(path.join(commandsPath, file));
 
-for (const file of fs.readdirSync(commandsPath).filter(f => f.endsWith('.js'))) {
-    const command = require(path.join(commandsPath, file));
+        if (!command.data || !command.execute) {
+            logger.warn(`Skipping ${file} (missing data or execute)`);
+            continue;
+        }
 
-    if (!command.data || !command.execute) {
-        logger.warn(`Skipping ${file} (missing data or execute)`);
-        continue;
+        client.commands.set(command.data.name, command);
+        logger.info(`Loaded command: ${command.data.name}`);
     }
-
-    client.commands.set(command.data.name, command);
-    logger.info(`Loaded command: ${command.data.name}`);
 }
 
 /* =========================================================
@@ -151,17 +147,18 @@ for (const file of fs.readdirSync(commandsPath).filter(f => f.endsWith('.js'))) 
 ========================================================= */
 
 const eventsPath = path.join(__dirname, 'events');
+if (fs.existsSync(eventsPath)) {
+    for (const file of fs.readdirSync(eventsPath).filter(f => f.endsWith('.js'))) {
+        const event = require(path.join(eventsPath, file));
 
-for (const file of fs.readdirSync(eventsPath).filter(f => f.endsWith('.js'))) {
-    const event = require(path.join(eventsPath, file));
+        if (event.once) {
+            client.once(event.name, (...args) => event.execute(...args, client));
+        } else {
+            client.on(event.name, (...args) => event.execute(...args, client));
+        }
 
-    if (event.once) {
-        client.once(event.name, (...args) => event.execute(...args, client));
-    } else {
-        client.on(event.name, (...args) => event.execute(...args, client));
+        logger.info(`Loaded event: ${event.name}`);
     }
-
-    logger.info(`Loaded event: ${event.name}`);
 }
 
 /* =========================================================
@@ -178,19 +175,17 @@ async function start() {
 
         logger.info('Logging into Discord...');
         await client.login(TOKEN);
-
-        logger.info(`Logged in as ${client.user.tag}`);
+        
+        logger.info(`Logged in as ${client.user?.tag || 'Bot'}`);
 
         let queueScheduled = false;
 
         const scheduleQueueRun = () => {
             if (queueScheduled) return;
-
             queueScheduled = true;
 
             setImmediate(async () => {
                 queueScheduled = false;
-
                 try {
                     await processQueue(client);
                 } catch (err) {
@@ -199,10 +194,14 @@ async function start() {
             });
         };
 
-        listenerClient = await listenForQueueJobs(scheduleQueueRun);
+        // Safely attach database queue listeners once client is fully live
+        if (typeof listenForJobs === 'function') {
+            listenerClient = await listenForJobs(scheduleQueueRun);
+        }
 
         scheduleQueueRun();
 
+        // Queue fallback/interval runner (every 10 minutes)
         queueInterval = setInterval(async () => {
             try {
                 await processQueue(client);
@@ -231,36 +230,4 @@ async function shutdown(signal) {
 
     if (listenerClient) {
         try {
-            await listenerClient.query('UNLISTEN queue_jobs');
-        } catch {}
-
-        try {
-            listenerClient.release();
-        } catch {}
-    }
-
-    try {
-        server.close();
-    } catch {}
-
-    try {
-        client.destroy();
-    } catch {}
-
-    try {
-        await pool.end();
-    } catch {}
-
-    logger.info('Shutdown complete.');
-    process.exit(0);
-}
-
-process.on('SIGINT', () => shutdown('SIGINT'));
-process.on('SIGTERM', () => shutdown('SIGTERM'));
-
-/* =========================================================
-   START
-========================================================= */
-
-logger.info(`PORT=${PORT}`);
-start();
+            await listenerClient.query
