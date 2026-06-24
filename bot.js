@@ -57,7 +57,10 @@ client.commands = new Collection();
    DEBUG (CRITICAL)
 ========================================================= */
 
-client.on('debug', (m) => logger.info(`[DISCORD DEBUG] ${m}`));
+client.on('debug', (m) => {
+    if (m.includes('Heartbeat')) return; // skip heartbeat spam
+    logger.info(`[DISCORD DEBUG] ${m}`);
+});
 client.on('error', (e) => logger.error(`[DISCORD ERROR] ${e?.stack || e}`));
 client.on('shardError', (e) => logger.error(`[DISCORD SHARD ERROR] ${e?.stack || e}`));
 
