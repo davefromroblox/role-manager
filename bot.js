@@ -181,7 +181,7 @@ async function start() {
         await Promise.race([
             client.login(TOKEN),
             new Promise((_, reject) => 
-                setTimeout(() => reject(new Error('Discord gateway connection timed out. Check Privileged Gateway Intents or network restrictions.')), 15000)
+                setTimeout(() => reject(new Error('Discord gateway connection timed out. Check Privileged Gateway Intents or network restrictions.')), 60000)
             )
         ]);
         
