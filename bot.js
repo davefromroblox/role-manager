@@ -114,14 +114,25 @@ const server = app.listen(PORT, '0.0.0.0', () => {
    DISCORD CLIENT INITIALIZATION
 ========================================================= */
 
+/* =========================================================
+   DISCORD CLIENT INITIALIZATION
+========================================================= */
+
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMembers,
-        GatewayIntentBits.GuildMessages,         // Added for robustness
-        GatewayIntentBits.MessageContent         // Added for message reading capabilities
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent,
+        GatewayIntentBits.GuildPresences
     ]
 });
+
+// ADD THESE FOUR LISTENERS HERE:
+client.on('debug', (info) => logger.info(`[DEBUG] ${info}`));
+client.on('warn', (info) => logger.warn(`[WARN] ${info}`));
+client.on('error', (err) => logger.error(`[CLIENT ERROR] ${err.stack}`));
+client.on('shardError', (err) => logger.error(`[SHARD ERROR] ${err.stack}`));
 
 client.commands = new Collection();
 
