@@ -117,7 +117,9 @@ const server = app.listen(PORT, '0.0.0.0', () => {
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMembers
+        GatewayIntentBits.GuildMembers,
+        GatewayIntentBits.GuildMessages,         // Added for robustness
+        GatewayIntentBits.MessageContent         // Added for message reading capabilities
     ]
 });
 
