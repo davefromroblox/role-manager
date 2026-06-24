@@ -10,7 +10,7 @@ const { pool, initDatabase, listenForQueueJobs, dbAll } = require('./lib/db');
 const { processQueue } = require('./lib/queue');
 
 /* =========================================================
-   ENVIRONMENT CHECKS
+   ENV
 ========================================================= */
 
 const TOKEN = process.env.DISCORD_TOKEN;
@@ -28,11 +28,11 @@ if (!DATABASE_URL) {
 }
 
 /* =========================================================
-   GLOBAL ERROR HANDLERS
+   ERROR HANDLERS
 ========================================================= */
 
 process.on('unhandledRejection', (reason) => {
-    logger.error(`Unhandled Rejection: ${reason instanceof Error ? reason.stack : reason}`);
+    logger.error(`Unhandled Rejection: ${reason?.stack || reason}`);
 });
 
 process.on('uncaughtException', (err) => {
@@ -41,44 +41,83 @@ process.on('uncaughtException', (err) => {
 });
 
 /* =========================================================
-   EXPRESS SERVER (Web Traffic & Health Checks)
+   DISCORD CLIENT
+========================================================= */
+
+const client = new Client({
+    intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMembers
+    ]
+});
+
+client.commands = new Collection();
+
+/* =========================================================
+   DEBUG (CRITICAL)
+========================================================= */
+
+client.on('debug', (m) => logger.info(`[DISCORD DEBUG] ${m}`));
+client.on('error', (e) => logger.error(`[DISCORD ERROR] ${e?.stack || e}`));
+client.on('shardError', (e) => logger.error(`[DISCORD SHARD ERROR] ${e?.stack || e}`));
+
+client.once('ready', () => {
+    logger.info(`Discord READY as ${client.user.tag}`);
+});
+
+/* =========================================================
+   LOAD COMMANDS
+========================================================= */
+
+const commandsPath = path.join(__dirname, 'commands');
+
+for (const file of fs.readdirSync(commandsPath).filter(f => f.endsWith('.js'))) {
+    const command = require(path.join(commandsPath, file));
+
+    if (!command.data || !command.execute) {
+        logger.warn(`Skipping ${file} (invalid command)`);
+        continue;
+    }
+
+    client.commands.set(command.data.name, command);
+    logger.info(`Loaded command: ${command.data.name}`);
+}
+
+/* =========================================================
+   LOAD EVENTS
+========================================================= */
+
+const eventsPath = path.join(__dirname, 'events');
+
+for (const file of fs.readdirSync(eventsPath).filter(f => f.endsWith('.js'))) {
+    const event = require(path.join(eventsPath, file));
+
+    if (event.once) {
+        client.once(event.name, (...args) => event.execute(...args, client));
+    } else {
+        client.on(event.name, (...args) => event.execute(...args, client));
+    }
+
+    logger.info(`Loaded event: ${event.name}`);
+}
+
+/* =========================================================
+   EXPRESS (START IMMEDIATELY FOR RENDER)
 ========================================================= */
 
 const app = express();
 app.use(express.json());
 
 app.get('/', (_req, res) => {
-    res.send('Bot is running.');
+    res.send('Bot running');
 });
 
-// Decoupled health check so Render container stays alive during asynchronous Discord gateway handshakes
 app.get('/health', (_req, res) => {
     res.json({
         status: 'ok',
-        uptime_seconds: process.uptime(),
+        discord: client.isReady(),
         timestamp: new Date().toISOString()
     });
-});
-
-app.post('/process-queue', async (_req, res) => {
-    try {
-        if (!client.isReady()) {
-            return res.status(503).json({
-                error: 'Discord client not ready'
-            });
-        }
-
-        await processQueue(client);
-
-        res.json({
-            status: 'success'
-        });
-    } catch (err) {
-        logger.error(`/process-queue: ${err.stack || err}`);
-        res.status(500).json({
-            error: err.message
-        });
-    }
 });
 
 app.get('/stats', async (_req, res) => {
@@ -95,14 +134,12 @@ app.get('/stats', async (_req, res) => {
             pending_jobs: Number(pending[0]?.count || 0),
             success_jobs: Number(success[0]?.count || 0),
             failed_jobs: Number(failed[0]?.count || 0),
-            total_audit_logs: Number(logs[0]?.count || 0),
+            total_logs: Number(logs[0]?.count || 0),
             timestamp: new Date().toISOString()
         });
     } catch (err) {
-        logger.error(err.stack || err);
-        res.status(500).json({
-            error: err.message
-        });
+        logger.error(err);
+        res.status(500).json({ error: err.message });
     }
 });
 
@@ -111,71 +148,7 @@ const server = app.listen(PORT, '0.0.0.0', () => {
 });
 
 /* =========================================================
-   DISCORD CLIENT INITIALIZATION
-========================================================= */
-
-/* =========================================================
-   DISCORD CLIENT INITIALIZATION
-========================================================= */
-
-const client = new Client({
-    intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMembers,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,
-        GatewayIntentBits.GuildPresences
-    ]
-});
-
-// ADD THESE FOUR LISTENERS HERE:
-client.on('debug', (info) => logger.info(`[DEBUG] ${info}`));
-client.on('warn', (info) => logger.warn(`[WARN] ${info}`));
-client.on('error', (err) => logger.error(`[CLIENT ERROR] ${err.stack}`));
-client.on('shardError', (err) => logger.error(`[SHARD ERROR] ${err.stack}`));
-
-client.commands = new Collection();
-
-/* =========================================================
-   LOAD COMMANDS
-========================================================= */
-
-const commandsPath = path.join(__dirname, 'commands');
-if (fs.existsSync(commandsPath)) {
-    for (const file of fs.readdirSync(commandsPath).filter(f => f.endsWith('.js'))) {
-        const command = require(path.join(commandsPath, file));
-
-        if (!command.data || !command.execute) {
-            logger.warn(`Skipping ${file} (missing data or execute)`);
-            continue;
-        }
-
-        client.commands.set(command.data.name, command);
-        logger.info(`Loaded command: ${command.data.name}`);
-    }
-}
-
-/* =========================================================
-   LOAD EVENTS
-========================================================= */
-
-const eventsPath = path.join(__dirname, 'events');
-if (fs.existsSync(eventsPath)) {
-    for (const file of fs.readdirSync(eventsPath).filter(f => f.endsWith('.js'))) {
-        const event = require(path.join(eventsPath, file));
-
-        if (event.once) {
-            client.once(event.name, (...args) => event.execute(...args, client));
-        } else {
-            client.on(event.name, (...args) => event.execute(...args, client));
-        }
-
-        logger.info(`Loaded event: ${event.name}`);
-    }
-}
-
-/* =========================================================
-   STARTUP SEQUENCE
+   STARTUP LOGIC
 ========================================================= */
 
 let listenerClient = null;
@@ -187,16 +160,20 @@ async function start() {
         await initDatabase();
 
         logger.info('Logging into Discord...');
-        
-        // Added timeout check to catch if Render's outbound IP gets stuck on the Discord gateway handshake
-        await Promise.race([
-            client.login(TOKEN),
-            new Promise((_, reject) => 
-                setTimeout(() => reject(new Error('Discord gateway connection timed out. Check Privileged Gateway Intents or network restrictions.')), 60000)
-            )
-        ]);
-        
-        logger.info(`Logged in as ${client.user?.tag || 'Bot'}`);
+
+        const loginPromise = client.login(TOKEN);
+
+        loginPromise
+            .then(() => logger.info('Discord login resolved'))
+            .catch(err => logger.error(`Discord login failed: ${err.stack || err}`));
+
+        await loginPromise;
+
+        logger.info(`Logged in as ${client.user.tag}`);
+
+        /* =========================
+           QUEUE SYSTEM
+        ========================= */
 
         let queueScheduled = false;
 
@@ -209,7 +186,7 @@ async function start() {
                 try {
                     await processQueue(client);
                 } catch (err) {
-                    logger.error(`Queue processing failed: ${err.stack || err}`);
+                    logger.error(`Queue error: ${err.stack || err}`);
                 }
             });
         };
@@ -224,51 +201,36 @@ async function start() {
             try {
                 await processQueue(client);
             } catch (err) {
-                logger.error(`Queue poll failed: ${err.stack || err}`);
+                logger.error(`Queue tick error: ${err.stack || err}`);
             }
         }, 10 * 60 * 1000);
 
-        logger.info('Bot startup complete.');
+        logger.info('Startup complete.');
     } catch (err) {
-        logger.error(`Startup failed:\n${err.stack || err}`);
+        logger.error(`Startup failed: ${err.stack || err}`);
         process.exit(1);
     }
 }
 
 /* =========================================================
-   SHUTDOWN HOOKS
+   SHUTDOWN
 ========================================================= */
 
 async function shutdown(signal) {
-    logger.info(`${signal} received. Shutting down...`);
+    logger.info(`${signal} received, shutting down...`);
 
-    if (queueInterval) {
-        clearInterval(queueInterval);
-    }
+    if (queueInterval) clearInterval(queueInterval);
 
     if (listenerClient) {
-        try {
-            await listenerClient.query('UNLISTEN queue_jobs');
-        } catch (_) {}
-
-        try {
-            listenerClient.release();
-        } catch (_) {}
+        try { await listenerClient.query('UNLISTEN queue_jobs'); } catch {}
+        try { listenerClient.release(); } catch {}
     }
 
-    try {
-        server.close();
-    } catch (_) {}
+    try { server.close(); } catch {}
+    try { client.destroy(); } catch {}
+    try { await pool.end(); } catch {}
 
-    try {
-        client.destroy();
-    } catch (_) {}
-
-    try {
-        await pool.end();
-    } catch (_) {}
-
-    logger.info('Shutdown complete.');
+    logger.info('Shutdown complete');
     process.exit(0);
 }
 
@@ -276,8 +238,7 @@ process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 
 /* =========================================================
-   ENTRYPOINT
+   BOOT
 ========================================================= */
 
-logger.info(`PORT=${PORT}`);
 start();
