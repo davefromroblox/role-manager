@@ -6,7 +6,7 @@ const express = require('express');
 const { Client, GatewayIntentBits, Collection } = require('discord.js');
 
 const logger = require('./lib/logger');
-const { pool, initDatabase, listenForQueueJobs, dbAll } = require('./lib/db'); // Adjusted to match standard helper names
+const { pool, initDatabase, listenForQueueJobs, dbAll } = require('./lib/db');
 const { processQueue } = require('./lib/queue');
 
 /* =========================================================
@@ -195,8 +195,8 @@ async function start() {
         };
 
         // Safely attach database queue listeners once client is fully live
-        if (typeof listenForJobs === 'function') {
-            listenerClient = await listenForJobs(scheduleQueueRun);
+        if (typeof listenForQueueJobs === 'function') {
+            listenerClient = await listenForQueueJobs(scheduleQueueRun);
         }
 
         scheduleQueueRun();
@@ -230,4 +230,36 @@ async function shutdown(signal) {
 
     if (listenerClient) {
         try {
-            await listenerClient.query
+            await listenerClient.query('UNLISTEN queue_jobs');
+        } catch (_) {}
+
+        try {
+            listenerClient.release();
+        } catch (_) {}
+    }
+
+    try {
+        server.close();
+    } catch (_) {}
+
+    try {
+        client.destroy();
+    } catch (_) {}
+
+    try {
+        await pool.end();
+    } catch (_) {}
+
+    logger.info('Shutdown complete.');
+    process.exit(0);
+}
+
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+
+/* =========================================================
+   START
+========================================================= */
+
+logger.info(`PORT=${PORT}`);
+start();
